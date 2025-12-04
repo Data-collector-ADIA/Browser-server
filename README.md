@@ -1,6 +1,6 @@
 # Browser Service
 
-The Browser Service manages Playwright browser instances remotely. It provides an HTTP REST API to start, stop, and manage browser instances that can be used by the Backend Service for browser automation tasks.
+The Browser Service manages Playwright browser instances remotely using gRPC. It provides a gRPC API to start, stop, and manage browser instances that can be used by the Backend Service for browser automation tasks.
 
 ## Overview
 
@@ -11,7 +11,7 @@ This service allows multiple backend instances to share browser resources by man
 - Start/stop browser instances on demand
 - Support for multiple browsers (Firefox, Chrome, WebKit)
 - CDP URL generation for remote browser connections
-- Health check endpoints
+- gRPC-based communication for better performance
 - Process management and cleanup
 
 ## Installation
@@ -33,115 +33,132 @@ pip install -r requirements.txt
 playwright install
 ```
 
-3. Create logs directory:
+3. Generate protobuf files (first time only):
 ```bash
-mkdir -p logs
+cd ../shared
+python generate_protos.py
+cd ../Browser-server
 ```
 
 ## Configuration
 
-Set environment variables (optional):
+### Environment Variables
 
 ```bash
-BROWSER_SERVICE_PORT=8001  # Default: 8001
+BROWSER_SERVICE_HOST=localhost    # Host to bind to (default: localhost)
+BROWSER_SERVICE_PORT=50051       # gRPC port (default: 50051)
 ```
+
+### Default Ports
+
+- **gRPC Service**: `50051`
 
 ## Usage
 
 ### Start the Service
 
+**For Testing (Single Machine):**
 ```bash
-python api_server.py
+# Run in a screen session
+screen -S browser-service
+python server.py
+# Press Ctrl+A then D to detach
 ```
 
-Or with custom port:
+**For Production (Separate Machine):**
 ```bash
-BROWSER_SERVICE_PORT=8001 python api_server.py
+export BROWSER_SERVICE_HOST=0.0.0.0
+export BROWSER_SERVICE_PORT=50051
+python server.py
 ```
 
-The service will start on `http://localhost:8001` by default.
+### gRPC Methods
 
-### API Endpoints
+The service exposes these gRPC methods:
 
-#### Health Check
-```bash
-GET /health
-```
-Returns service health status.
+#### StartBrowser
+Start a browser instance.
 
-#### Start Browser
-```bash
-POST /browser/start
-Content-Type: application/json
-
-{
-  "browser_name": "firefox",  // firefox, chrome, webkit
-  "port": 9999
+**Request:**
+```protobuf
+message StartBrowserRequest {
+  string browser_name = 1;  // firefox, webkit, chrome
+  int32 port = 2;
 }
 ```
 
-Response:
-```json
-{
-  "success": true,
-  "message": "",
-  "cdp_url": "http://localhost:9999",
-  "ws_endpoint": "ws://localhost:9999/"
+**Response:**
+```protobuf
+message StartBrowserResponse {
+  bool success = 1;
+  string message = 2;
+  string cdp_url = 3;
+  string ws_endpoint = 4;
 }
 ```
 
-#### Stop Browser
-```bash
-POST /browser/stop
-Content-Type: application/json
+#### StopBrowser
+Stop a browser instance.
 
-{
-  "port": 9999
+**Request:**
+```protobuf
+message StopBrowserRequest {
+  int32 port = 1;
 }
 ```
 
-#### Get Browser Connection
-```bash
-GET /browser/{port}/connection
-```
+#### GetBrowserConnection
+Get browser connection info and CDP URL.
 
-Returns:
-```json
-{
-  "running": true,
-  "cdp_url": "http://localhost:9999",
-  "ws_endpoint": "ws://localhost:9999/",
-  "ip": "192.168.1.100",
-  "port": 9999
+**Request:**
+```protobuf
+message GetBrowserConnectionRequest {
+  int32 port = 1;
 }
 ```
 
-#### Check Browser Status
-```bash
-GET /browser/{port}/status
+**Response:**
+```protobuf
+message GetBrowserConnectionResponse {
+  bool running = 1;
+  string cdp_url = 2;
+  string ws_endpoint = 3;
+  string ip = 4;
+  int32 port = 5;
+}
 ```
 
-Returns:
-```json
-{
-  "running": true
+#### IsBrowserRunning
+Check if browser is running.
+
+**Request:**
+```protobuf
+message IsBrowserRunningRequest {
+  int32 port = 1;
+}
+```
+
+**Response:**
+```protobuf
+message IsBrowserRunningResponse {
+  bool running = 1;
 }
 ```
 
 ## Architecture
 
 The service uses:
-- **FastAPI** for the REST API server
+- **gRPC** for the RPC server
 - **Playwright** for browser management
 - **psutil** for port checking and process management
 
 ## Integration with Backend Service
 
-The Backend Service connects to this service to:
-1. Request a browser instance
-2. Get the CDP URL for browser_use
+The Backend Service connects to this service via gRPC to:
+1. Request a browser instance (`StartBrowser`)
+2. Get the CDP URL (`GetBrowserConnection`)
 3. Use the remote browser for automation tasks
-4. Release the browser when done
+4. Release the browser when done (`StopBrowser`)
 
 Example CDP URL usage in browser_use:
 ```python
@@ -152,44 +169,89 @@ browser = Browser(
 )
 ```
 
+## Testing
+
+### Using grpcurl
+
+```bash
+# List available services
+grpcurl -plaintext localhost:50051 list
+
+# Start browser
+grpcurl -plaintext -d '{"browser_name": "firefox", "port": 9999}' \
+  localhost:50051 browser_service.BrowserService/StartBrowser
+
+# Check status
+grpcurl -plaintext -d '{"port": 9999}' \
+  localhost:50051 browser_service.BrowserService/IsBrowserRunning
+```
+
 ## Troubleshooting
 
 ### Browser won't start
 - Check if the port is already in use
 - Ensure Playwright browsers are installed
-- Check logs in `logs/browser.log`
+- Check service logs
 
 ### Port conflicts
 - Use different ports for multiple browser instances
 - Check running processes: `netstat -an | grep <port>`
+
+### Protobuf import errors
+```bash
+# Regenerate protobuf files
+cd ../shared
+python generate_protos.py
+```
+
+### Connection refused
+- Verify service is running: `grpcurl -plaintext localhost:50051 list`
+- Check firewall rules
+- Verify port is not blocked
 
 ## Development
 
 ### Project Structure
 ```
 Browser-server/
-├── api_server.py      # FastAPI HTTP server
-├── browser_server.py  # Browser management logic
-├── utils.py           # Utility functions
-├── requirements.txt   # Python dependencies
-└── README.md         # This file
+├── server.py              # gRPC server
+├── browser_server.py      # Browser management logic
+├── utils.py               # Utility functions
+├── requirements.txt       # Python dependencies
+├── QUICKSTART.md          # Quick start guide
+└── README.md              # This file
 ```
 
-### Testing
+### Running in Development
 
-Test the service endpoints:
 ```bash
-# Health check
-curl http://localhost:8001/health
+# Start service
+python server.py
 
-# Start browser
-curl -X POST http://localhost:8001/browser/start \
-  -H "Content-Type: application/json" \
-  -d '{"browser_name": "firefox", "port": 9999}'
-
-# Check status
-curl http://localhost:8001/browser/9999/status
+# In another terminal, test with grpcurl
+grpcurl -plaintext localhost:50051 list
 ```
+
+## Deployment
+
+### Single Machine (Testing)
+
+Run in a screen session:
+```bash
+screen -S browser-service
+python server.py
+```
+
+### Separate Machine (Production)
+
+1. Install dependencies
+2. Configure environment variables
+3. Run service: `python server.py`
+4. Expose port 50051
+
+## Quick Start
+
+See [QUICKSTART.md](QUICKSTART.md) for a quick setup guide.
 
 ## License
 
