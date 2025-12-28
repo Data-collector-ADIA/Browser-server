@@ -1,10 +1,6 @@
-"""
-Browser Service - gRPC server for managing Playwright browser instances
-Provides remote browser access for the backend service.
-"""
-
 import asyncio
 import logging
+import os
 from concurrent import futures
 from typing import Optional
 
@@ -19,61 +15,56 @@ from browser_server import (
 from utils import get_local_ip
 
 # Import generated protobuf code
-# Note: You'll need to generate these from the .proto files
-# python -m grpc_tools.protoc -I../shared/protos --python_out=. --grpc_python_out=. browser_service.proto
-
-# For now, we'll create a placeholder structure
-# You'll need to generate the actual protobuf Python code
 try:
     import browser_service_pb2
     import browser_service_pb2_grpc
+    PROTOBUF_AVAILABLE = True
 except ImportError:
-    # Fallback: We'll create simple message classes
     logging.warning("Protobuf files not found. Using placeholder classes.")
-    
-    class StartBrowserRequest:
-        def __init__(self):
-            self.browser_name = ""
-            self.port = 9999
-    
-    class StartBrowserResponse:
-        def __init__(self):
-            self.success = False
-            self.message = ""
-            self.cdp_url = ""
-            self.ws_endpoint = ""
-    
-    class StopBrowserRequest:
-        def __init__(self):
-            self.port = 9999
-    
-    class StopBrowserResponse:
-        def __init__(self):
-            self.success = False
-            self.message = ""
-    
-    class GetBrowserConnectionRequest:
-        def __init__(self):
-            self.port = 9999
-    
-    class GetBrowserConnectionResponse:
-        def __init__(self):
-            self.running = False
-            self.cdp_url = ""
-            self.ws_endpoint = ""
-            self.ip = ""
-            self.port = 0
-    
-    class IsBrowserRunningRequest:
-        def __init__(self):
-            self.port = 9999
-    
-    class IsBrowserRunningResponse:
-        def __init__(self):
-            self.running = False
+    PROTOBUF_AVAILABLE = False
 
-    class BrowserServiceServicer:
-        pass
+# Placeholder classes for fallback
+class StartBrowserRequest:
+    def __init__(self):
+        self.browser_name = ""
+        self.port = 9999
+
+class StartBrowserResponse:
+    def __init__(self):
+        self.success = False
+        self.message = ""
+        self.cdp_url = ""
+        self.ws_endpoint = ""
+
+class StopBrowserRequest:
+    def __init__(self):
+        self.port = 9999
+
+class StopBrowserResponse:
+    def __init__(self):
+        self.success = False
+        self.message = ""
+
+class GetBrowserConnectionRequest:
+    def __init__(self):
+        self.port = 9999
+
+class GetBrowserConnectionResponse:
+    def __init__(self):
+        self.running = False
+        self.cdp_url = ""
+        self.ws_endpoint = ""
+        self.ip = ""
+        self.port = 0
+
+class IsBrowserRunningRequest:
+    def __init__(self):
+        self.port = 9999
+
+class IsBrowserRunningResponse:
+    def __init__(self):
+        self.running = False
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,38 +73,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class BrowserServiceServicer:
+class BrowserServiceServicer(browser_service_pb2_grpc.BrowserServiceServicer if PROTOBUF_AVAILABLE else object):
     """gRPC servicer for Browser Service"""
     
     def StartBrowser(self, request, context):
         """Start a browser instance"""
         try:
-            browser_name = request.browser_name or "firefox"
+            browser_name = request.browser_name or "chrome"
             port = request.port or 9999
             
             logger.info(f"Starting browser: {browser_name} on port {port}")
-            success, message = start_browser(browser_name, port)
+            success, used_port, message = start_browser(browser_name, port)
             
-            response = StartBrowserResponse()
+            response = browser_service_pb2.StartBrowserResponse() if PROTOBUF_AVAILABLE else StartBrowserResponse()
             response.success = success
             response.message = message or ""
             
             if success:
-                # Get connection info
-                conn_info = get_browser_connection(port)
+                # Get connection info using the ACTUAL port used
+                conn_info = get_browser_connection(used_port)
                 if conn_info:
-                    local_ip = get_local_ip()
-                    # CDP URL format: http://ip:port
-                    response.cdp_url = f"http://{local_ip}:{port}"
-                    response.ws_endpoint = conn_info.get("wsEndpoint", "")
+                    response.cdp_url = conn_info.get("cdp_url", "")
+                    response.ws_endpoint = conn_info.get("ws_endpoint", "")
                 else:
-                    response.cdp_url = f"http://{get_local_ip()}:{port}"
-                    response.ws_endpoint = f"ws://{get_local_ip()}:{port}/"
+                    ip = "127.0.0.1"
+                    response.cdp_url = f"ws://{ip}:{used_port}/"
+                    response.ws_endpoint = f"ws://{ip}:{used_port}/"
             
             return response
         except Exception as e:
             logger.error(f"Error starting browser: {e}", exc_info=True)
-            response = StartBrowserResponse()
+            response = browser_service_pb2.StartBrowserResponse() if PROTOBUF_AVAILABLE else StartBrowserResponse()
             response.success = False
             response.message = str(e)
             return response
@@ -126,13 +116,13 @@ class BrowserServiceServicer:
             
             success, message = close_browser(port)
             
-            response = StopBrowserResponse()
+            response = browser_service_pb2.StopBrowserResponse() if PROTOBUF_AVAILABLE else StopBrowserResponse()
             response.success = success
             response.message = message or ""
             return response
         except Exception as e:
             logger.error(f"Error stopping browser: {e}", exc_info=True)
-            response = StopBrowserResponse()
+            response = browser_service_pb2.StopBrowserResponse() if PROTOBUF_AVAILABLE else StopBrowserResponse()
             response.success = False
             response.message = str(e)
             return response
@@ -143,21 +133,27 @@ class BrowserServiceServicer:
             port = request.port or 9999
             running = is_browser_running(port)
             
-            response = GetBrowserConnectionResponse()
+            response = browser_service_pb2.GetBrowserConnectionResponse() if PROTOBUF_AVAILABLE else GetBrowserConnectionResponse()
             response.running = running
             
             if running:
                 conn_info = get_browser_connection(port)
-                local_ip = get_local_ip()
-                response.cdp_url = f"http://{local_ip}:{port}"
-                response.ws_endpoint = conn_info.get("wsEndpoint", "") if conn_info else f"ws://{local_ip}:{port}/"
-                response.ip = local_ip
-                response.port = port
+                if conn_info:
+                    response.cdp_url = conn_info.get("cdp_url", "")
+                    response.ws_endpoint = conn_info.get("ws_endpoint", "")
+                    response.ip = conn_info.get("ip", "")
+                    response.port = conn_info.get("port", port)
+                else:
+                    ip = "127.0.0.1"
+                    response.cdp_url = f"ws://{ip}:{port}/"
+                    response.ws_endpoint = f"ws://{ip}:{port}/"
+                    response.ip = ip
+                    response.port = port
             
             return response
         except Exception as e:
             logger.error(f"Error getting browser connection: {e}", exc_info=True)
-            response = GetBrowserConnectionResponse()
+            response = browser_service_pb2.GetBrowserConnectionResponse() if PROTOBUF_AVAILABLE else GetBrowserConnectionResponse()
             response.running = False
             return response
     
@@ -167,17 +163,17 @@ class BrowserServiceServicer:
             port = request.port or 9999
             running = is_browser_running(port)
             
-            response = IsBrowserRunningResponse()
+            response = browser_service_pb2.IsBrowserRunningResponse() if PROTOBUF_AVAILABLE else IsBrowserRunningResponse()
             response.running = running
             return response
         except Exception as e:
             logger.error(f"Error checking browser status: {e}", exc_info=True)
-            response = IsBrowserRunningResponse()
+            response = browser_service_pb2.IsBrowserRunningResponse() if PROTOBUF_AVAILABLE else IsBrowserRunningResponse()
             response.running = False
             return response
 
 
-def serve(port: int = 50051):
+def serve(port: int = 50061):
     """Start the gRPC server"""
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     
@@ -185,11 +181,10 @@ def serve(port: int = 50051):
     servicer = BrowserServiceServicer()
     try:
         browser_service_pb2_grpc.add_BrowserServiceServicer_to_server(servicer, server)
-    except NameError:
-        logger.warning("Using placeholder servicer (protobuf files not generated)")
-        # In production, you must generate protobuf files first
+    except Exception as e:
+        logger.warning(f"Could not add servicer to server: {e}")
     
-    listen_addr = f"[::]:{port}"
+    listen_addr = f"0.0.0.0:{port}"
     server.add_insecure_port(listen_addr)
     server.start()
     
@@ -203,7 +198,6 @@ def serve(port: int = 50051):
 
 
 if __name__ == "__main__":
-    import os
-    port = int(os.getenv("BROWSER_SERVICE_PORT", "50051"))
+    port = int(os.getenv("BROWSER_SERVICE_PORT", "50061"))
     serve(port)
 
