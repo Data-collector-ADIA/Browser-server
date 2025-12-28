@@ -1,0 +1,15 @@
+DEBUG: Browser Service gRPC server started on 127.0.0.1:50061
+DEBUG: StartBrowser requested for chromium on port 9999
+DEBUG: Getting executable path for chromium
+DEBUG: Found path: C:\Users\hp\AppData\Local\ms-playwright\chromium-1187\chrome-win\chrome.exe
+DEBUG: start_browser returned success=True, message=None
+DEBUG: Getting browser connection info...
+DEBUG: get_browser_connection returned {'ip': '192.168.0.124', 'port': 9999, 'cdp_url': 'http://192.168.0.124:9999', 'ws_endpoint': 'ws://192.168.0.124:9999/'}
+DEBUG: Returning StartBrowserResponse
+DEBUG: StartBrowser requested for chromium on port 9999
+DEBUG: Getting executable path for chromium
+DEBUG: Found path: C:\Users\hp\AppData\Local\ms-playwright\chromium-1187\chrome-win\chrome.exe
+DEBUG: start_browser returned success=True, message=None
+DEBUG: Getting browser connection info...
+DEBUG: get_browser_connection returned {'ip': '192.168.0.124', 'port': 9999, 'cdp_url': 'http://192.168.0.124:9999', 'ws_endpoint': 'ws://192.168.0.124:9999/'}
+DEBUG: Returning StartBrowserResponse
